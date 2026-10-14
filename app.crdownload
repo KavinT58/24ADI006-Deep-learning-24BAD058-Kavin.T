@@ -1,0 +1,133 @@
+import torch
+import gradio as gr
+from transformers import AutoTokenizer, AutoModelForCausalLM
+
+print("Name: Kavin T")
+print("Roll Number: 24BAD058")
+
+MODEL_NAME = "Qwen/Qwen2.5-1.5B-Instruct"
+
+print("Loading tokenizer...")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+print("Loading language model...")
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_NAME,
+    torch_dtype="auto",
+    device_map="auto"
+)
+
+model.eval()
+
+
+def generate_response(prompt, history=None):
+    if not prompt or not prompt.strip():
+        return "Please enter a question."
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful educational AI chatbot. "
+                "Answer accurately using simple English. "
+                "Keep answers concise, clear, and complete. "
+                "Always consider conversation history when answering "
+                "follow-up questions. Resolve words such as it, this, "
+                "that, first, and second using previous messages. "
+                "Answer the exact question asked. "
+                "For questions requesting a specific number of items, "
+                "provide exactly that number. "
+                "Never provide unrelated information or invent facts."
+            )
+        }
+    ]
+
+    if history:
+        for item in history[-6:]:
+            if isinstance(item, dict):
+                role = item.get("role")
+                content = item.get("content")
+
+                if role in ("user", "assistant") and isinstance(content, str):
+                    messages.append({
+                        "role": role,
+                        "content": content
+                    })
+
+            elif isinstance(item, (list, tuple)) and len(item) == 2:
+                if item[0]:
+                    messages.append({
+                        "role": "user",
+                        "content": str(item[0])
+                    })
+
+                if item[1]:
+                    messages.append({
+                        "role": "assistant",
+                        "content": str(item[1])
+                    })
+
+    messages.append({
+        "role": "user",
+        "content": prompt.strip()
+    })
+
+    inputs = tokenizer.apply_chat_template(
+        messages,
+        tokenize=True,
+        add_generation_prompt=True,
+        return_tensors="pt",
+        return_dict=True
+    )
+
+    inputs = {
+        key: value.to(model.device)
+        for key, value in inputs.items()
+    }
+
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=150,
+            do_sample=False,
+            repetition_penalty=1.05,
+            pad_token_id=tokenizer.eos_token_id,
+            eos_token_id=tokenizer.eos_token_id
+        )
+
+    new_tokens = outputs[0][inputs["input_ids"].shape[1]:]
+
+    response = tokenizer.decode(
+        new_tokens,
+        skip_special_tokens=True
+    ).strip()
+
+    return response if response else "Sorry, please try asking again."
+
+
+def chatbot_response(message, history):
+    if not message or not message.strip():
+        return "Please enter a question."
+
+    return generate_response(message, history)
+
+
+demo = gr.ChatInterface(
+    fn=chatbot_response,
+    title="Student AI Chatbot",
+    description=(
+        "An educational chatbot powered by "
+        "Qwen2.5-1.5B-Instruct. "
+        "Developed by Kavin T | Roll No: 24BAD058"
+    ),
+    examples=[
+        "What is artificial intelligence?",
+        "Explain machine learning in simple words.",
+        "What is the difference between Python and Java?",
+        "Give me three benefits of renewable energy.",
+        "What is Retrieval-Augmented Generation (RAG)?"
+    ]
+)
+
+if __name__ == "__main__":
+    demo.launch()
